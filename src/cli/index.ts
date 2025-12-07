@@ -16,12 +16,24 @@ async function main() {
   let boardSize = 10;
   let starsPerUnit = 2;
   let families: string[] = [
-    'E1_candidateDeficit',
-    'A1_rowBand_regionBudget',
-    'A2_colBand_regionBudget',
+    'A1_rowBandRegionBudget',
+    'A2_colBandRegionBudget',
+    'A3_regionRowBandPartition',
+    'A4_regionColBandPartition',
+    'B1_exclusiveRegionsRowBand',
+    'B2_exclusiveRegionsColBand',
+    'B3_exclusiveRowsInRegion',
+    'B4_exclusiveColsInRegion',
     'C1_bandExactCages',
-    'C2_cages_regionQuota',
+    'C2_cagesRegionQuota',
+    'C3_internalCagePlacement',
+    'C4_cageExclusion',
     'D1_rowColIntersection',
+    'D2_regionBandIntersection',
+    'E1_candidateDeficit',
+    'E2_partitionedCandidates',
+    'F1_regionPairExclusion',
+    'F2_exclusivityChains'
   ];
   let outputDir = join(process.cwd(), 'output');
 

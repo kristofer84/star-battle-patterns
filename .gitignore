@@ -1,6 +1,5 @@
-.gitignorenode_modules
-vitest-example-*
+node_modules
 local
 .vscode
-**/dist
-**/output
+dist
+output

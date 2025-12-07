@@ -2,46 +2,101 @@
 
 Offline tool for generating pattern files for the schema-based Star Battle solver.
 
-## Purpose
-
-This tool mines patterns from schema definitions and generates JSON pattern files that can be imported into the `star-battle-solver` application.
-
 ## Status
 
-🚧 **Under Construction**
+✅ **Mining Algorithm Implemented!**
 
-The pattern miner is not yet fully implemented. This is a placeholder structure.
+The pattern miner is now fully functional with:
+- Exact solver for pattern verification
+- Window enumeration and board building
+- Schema precondition testing
+- Pattern verification and deduplication
+- CLI tool for running the miner
 
-## Planned Structure
-
-```
-star-battle-patterns/
-├── src/
-│   ├── miner/          # Pattern mining logic
-│   ├── model/          # Shared data models
-│   ├── solver/         # Exact solver for verification
-│   ├── schemas/        # Schema definitions (shared with solver)
-│   └── cli/            # CLI entry point
-├── output/             # Generated pattern files
-└── tests/
-```
-
-## Usage (Planned)
+## Usage
 
 ```bash
 # Build
 npm run build
 
 # Mine patterns
-npm run mine-patterns -- --board-size 10 --stars 2 --families A1,A2,C2
+npm run mine-patterns -- --board-size 10 --stars 2 --families A1_rowBand_regionBudget,C2_cages_regionQuota
 
-# Output will be in output/ directory
-# Copy to star-battle-solver/src/specs/patterns/
+# With custom output directory
+npm run mine-patterns -- --board-size 10 --stars 2 --families A1_rowBand_regionBudget --output ./my-patterns
+```
+
+## How It Works
+
+1. **Window Enumeration**: Enumerates all possible windows of different sizes (4×4, 5×5, 6×6)
+
+2. **Board Building**: For each window, builds an abstract board model with:
+   - Simplified region structure
+   - Row/column groups
+   - Cell states (initially all unknown)
+
+3. **Precondition Testing**: Tests if schema preconditions hold in the window
+
+4. **Configuration Testing**: Tries different initial configurations (forced stars/empties)
+
+5. **Pattern Verification**: Uses exact solver to enumerate all completions and find forced deductions
+
+6. **Pattern Generation**: Creates patterns with normalized coordinates and deduplicates
+
+7. **File Generation**: Outputs JSON pattern files ready for import into the solver
+
+## Output
+
+Generated pattern files will be in the `output/` directory (or custom directory):
+
+```
+output/
+├── 10x10-A1_rowBand_regionBudget-patterns.json
+├── 10x10-C2_cages_regionQuota-patterns.json
+└── ...
+```
+
+## Integration
+
+1. Copy generated pattern files to:
+   ```
+   star-battle-solver/src/specs/patterns/
+   ```
+
+2. Update `star-battle-solver/src/specs/patterns/index.ts` to import them:
+   ```typescript
+   import patternsA1 from './10x10-A1_rowBand_regionBudget-patterns.json';
+   
+   export const patternFiles: Array<{ id: string; data: any }> = [
+     { id: 'A1_rowBand_regionBudget', data: patternsA1 },
+     // ... more patterns
+   ];
+   ```
+
+3. The solver will automatically load and use the patterns!
+
+## Architecture
+
+```
+src/
+├── solver/
+│   └── exactSolver.ts        # Backtracking exact solver
+├── miner/
+│   ├── windowEnumerator.ts   # Window enumeration
+│   ├── boardBuilder.ts        # Abstract board building
+│   ├── schemaTesters.ts       # Precondition testing
+│   ├── patternVerifier.ts     # Pattern verification
+│   ├── patternGenerator.ts    # Main mining loop
+│   ├── patternLibrary.ts      # File generation
+│   ├── deduplicator.ts        # Pattern deduplication
+│   └── familyMiners.ts        # Family-specific miners
+├── model/
+│   └── types.ts               # Type definitions
+└── cli/
+    └── index.ts                # CLI entry point
 ```
 
 ## Pattern File Format
-
-Pattern files will be JSON with this structure:
 
 ```json
 {
@@ -51,10 +106,13 @@ Pattern files will be JSON with this structure:
   "family_id": "A1_rowBand_regionBudget",
   "patterns": [
     {
-      "id": "pattern_001",
+      "id": "A1_rowBand_regionBudget_pattern_0001",
       "window_width": 5,
       "window_height": 5,
-      "data": { /* schema-specific data */ },
+      "data": {
+        "row_band": [0, 1, 2],
+        "regions": [1, 2, 3]
+      },
       "deductions": [
         {
           "type": "forceStar",
@@ -66,10 +124,22 @@ Pattern files will be JSON with this structure:
 }
 ```
 
-## Integration
+## Performance
 
-Generated pattern files should be placed in:
-`star-battle-solver/src/specs/patterns/`
+- Window enumeration: O(board_size² × window_sizes)
+- Pattern verification: O(completions × window_size²)
+- Timeout: 5 seconds per pattern verification
+- Max completions: 1000 per verification
 
-The solver will load them automatically via `src/specs/patterns/index.ts`.
+For a 10×10 board with 3 window sizes, expect:
+- ~1000-5000 windows to test
+- Several seconds to minutes per family
+- Output: 0-100+ patterns per family (depends on schema complexity)
 
+## Future Enhancements
+
+- More sophisticated precondition testing
+- Family-specific mining optimizations
+- Pattern rotation/mirror canonicalization
+- Parallel mining for multiple families
+- Progress persistence (resume interrupted mining)

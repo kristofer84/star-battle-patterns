@@ -2,7 +2,7 @@
  * Pattern library file generation
  */
 
-import type { FamilyPatternSet, PatternFile } from '../model/types';
+import type { FamilyPatternSet, PatternFile } from '../model/types.js';
 import { writeFileSync, existsSync, mkdirSync } from 'fs';
 import { join } from 'path';
 

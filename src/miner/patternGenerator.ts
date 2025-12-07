@@ -2,19 +2,388 @@
  * Pattern generator - main mining loop
  */
 
-import type { Pattern, WindowSpec, FamilyPatternSet } from '../model/types';
-import { enumerateWindows } from './windowEnumerator';
-import { verifyPattern } from './patternVerifier';
-import { buildWindowBoard, applyFixedClues } from './boardBuilder';
-import { testSchemaPreconditions } from './schemaTesters';
-import { normalizePattern, canonicalizePattern } from './windowEnumerator';
-import { deduplicatePatterns } from './deduplicator';
+import type { Pattern, WindowSpec, FamilyPatternSet } from '../model/types.js';
+import type { BoardState } from '../solver/exactSolver.js';
+import { CellState } from '../solver/exactSolver.js';
+import { enumerateWindows } from './windowEnumerator.js';
+import { verifyPattern } from './patternVerifier.js';
+import { buildWindowBoard, applyFixedClues } from './boardBuilder.js';
+import { testSchemaPreconditions } from './schemaTesters.js';
+import { normalizePattern, canonicalizePattern } from './windowEnumerator.js';
+import { deduplicatePatterns } from './deduplicator.js';
 
 /**
  * Generate a unique pattern ID
  */
 function generatePatternId(familyId: string, index: number): string {
   return `${familyId}_pattern_${index.toString().padStart(4, '0')}`;
+}
+
+/**
+ * Generate region structures for mining
+ * Creates more realistic region layouts that match schema requirements
+ */
+function generateRegionStructures(
+  width: number,
+  height: number,
+  familyId: string
+): Array<Map<number, number[]>> {
+  const structures: Array<Map<number, number[]>> = [];
+  
+  if (familyId.includes('E1') || familyId.includes('candidateDeficit')) {
+    // For E1: Simple structures work fine
+    const structure = new Map<number, number[]>();
+    for (let r = 0; r < height; r++) {
+      const cells: number[] = [];
+      for (let c = 0; c < width; c++) {
+        cells.push(r * width + c);
+      }
+      structure.set(r + 1, cells);
+    }
+    structures.push(structure);
+  } else if (familyId.includes('C1') || familyId.includes('exactCages')) {
+    // For C1: Need regions that work with 2x2 blocks
+    const structure = new Map<number, number[]>();
+    // Create regions that align with 2x2 blocks
+    let regionId = 1;
+    for (let r = 0; r < height; r += 2) {
+      for (let c = 0; c < width; c += 2) {
+        const cells: number[] = [];
+        for (let dr = 0; dr < 2 && r + dr < height; dr++) {
+          for (let dc = 0; dc < 2 && c + dc < width; dc++) {
+            cells.push((r + dr) * width + (c + dc));
+          }
+        }
+        if (cells.length > 0) {
+          structure.set(regionId++, cells);
+        }
+      }
+    }
+    structures.push(structure);
+  } else if (familyId.includes('D1') || familyId.includes('rowColIntersection')) {
+    // For D1: Simple row/column structure
+    const structure = new Map<number, number[]>();
+    for (let r = 0; r < height; r++) {
+      const cells: number[] = [];
+      for (let c = 0; c < width; c++) {
+        cells.push(r * width + c);
+      }
+      structure.set(r + 1, cells);
+    }
+    structures.push(structure);
+  } else if (familyId.includes('rowBand') || familyId.includes('A1')) {
+    // For A1: Create regions that span multiple rows
+    // Structure 1: Each row is a region (simple)
+    const structure1 = new Map<number, number[]>();
+    for (let r = 0; r < height; r++) {
+      const cells: number[] = [];
+      for (let c = 0; c < width; c++) {
+        cells.push(r * width + c);
+      }
+      structure1.set(r + 1, cells);
+    }
+    structures.push(structure1);
+    
+    // Structure 2: Some regions span 2 rows, some are single rows
+    const structure2 = new Map<number, number[]>();
+    let regionId = 1;
+    for (let r = 0; r < height; r += 2) {
+      if (r + 1 < height) {
+        // Two-row region
+        const cells: number[] = [];
+        for (let c = 0; c < width; c++) {
+          cells.push(r * width + c);
+          cells.push((r + 1) * width + c);
+        }
+        structure2.set(regionId++, cells);
+      } else {
+        // Single-row region
+        const cells: number[] = [];
+        for (let c = 0; c < width; c++) {
+          cells.push(r * width + c);
+        }
+        structure2.set(regionId++, cells);
+      }
+    }
+    structures.push(structure2);
+    
+    // Structure 3: Mixed - some full inside, some partial
+    const structure3 = new Map<number, number[]>();
+    // First region: fully inside (rows 0-1)
+    const region1: number[] = [];
+    for (let r = 0; r < 2 && r < height; r++) {
+      for (let c = 0; c < width; c++) {
+        region1.push(r * width + c);
+      }
+    }
+    structure3.set(1, region1);
+    
+    // Second region: partial (extends beyond window)
+    const region2: number[] = [];
+    for (let r = 1; r < height; r++) {
+      for (let c = 0; c < width; c++) {
+        region2.push(r * width + c);
+      }
+    }
+    structure3.set(2, region2);
+    
+    // Third region: partial (starts in middle)
+    if (height >= 3) {
+      const region3: number[] = [];
+      for (let r = 2; r < height; r++) {
+        for (let c = 0; c < width; c++) {
+          region3.push(r * width + c);
+        }
+      }
+      structure3.set(3, region3);
+    }
+    structures.push(structure3);
+  } else {
+    // Default: simple row-based regions
+    const structure = new Map<number, number[]>();
+    for (let r = 0; r < height; r++) {
+      const cells: number[] = [];
+      for (let c = 0; c < width; c++) {
+        cells.push(r * width + c);
+      }
+      structure.set(r + 1, cells);
+    }
+    structures.push(structure);
+  }
+  
+  return structures;
+}
+
+/**
+ * Generate test configurations for pattern mining
+ * Creates systematic configurations that match schema requirements
+ */
+function generateTestConfigurations(
+  state: BoardState,
+  window: WindowSpec,
+  width: number,
+  height: number,
+  familyId: string,
+  preconditionData?: any
+): Array<{ forcedStars: number[]; forcedEmpties: number[] }> {
+  const configs: Array<{ forcedStars: number[]; forcedEmpties: number[] }> = [];
+  const totalCells = width * height;
+  
+  if (familyId.includes('E1') || familyId.includes('candidateDeficit')) {
+    // For E1: Create configurations that lead to candidate deficit
+    // Config 1: Empty board (might not trigger E1)
+    configs.push({ forcedStars: [], forcedEmpties: [] });
+    
+    // Config 2: Place stars to reduce candidates in a group
+    // Find a group and place stars to create deficit scenario
+    for (const row of state.rows) {
+      const candidates = row.cells.filter(c => state.cellStates[c] === CellState.Unknown);
+      if (candidates.length > row.starsRequired) {
+        // Place stars to reduce candidates to exactly starsRequired
+        const starsToPlace = candidates.length - row.starsRequired;
+        if (starsToPlace > 0 && starsToPlace < candidates.length) {
+          const forcedStars = candidates.slice(0, starsToPlace);
+          const forcedEmpties: number[] = [];
+          // Mark adjacent cells as empty
+          for (const starCell of forcedStars) {
+            const rowIdx = Math.floor(starCell / width);
+            const colIdx = starCell % width;
+            for (let dr = -1; dr <= 1; dr++) {
+              for (let dc = -1; dc <= 1; dc++) {
+                if (dr === 0 && dc === 0) continue;
+                const r = rowIdx + dr;
+                const c = colIdx + dc;
+                if (r >= 0 && r < height && c >= 0 && c < width) {
+                  const neighborId = r * width + c;
+                  if (neighborId < totalCells && !forcedStars.includes(neighborId)) {
+                    forcedEmpties.push(neighborId);
+                  }
+                }
+              }
+            }
+          }
+          configs.push({ forcedStars, forcedEmpties: [...new Set(forcedEmpties)] });
+          break; // Just one example
+        }
+      }
+    }
+  } else if (familyId.includes('C1') || familyId.includes('exactCages')) {
+    // For C1: Create configurations where valid blocks = remaining stars
+    configs.push({ forcedStars: [], forcedEmpties: [] });
+    
+    // Place some stars to create the exact match condition
+    if (preconditionData?.valid_blocks && preconditionData.valid_blocks > 0) {
+      // Try placing stars to match the block count
+      const starsToPlace = preconditionData.remaining_stars || 0;
+      if (starsToPlace > 0 && starsToPlace < totalCells) {
+        const forcedStars: number[] = [];
+        const forcedEmpties: number[] = [];
+        
+        // Place stars in a pattern that creates the exact match
+        let placed = 0;
+        for (let r = 0; r < height - 1 && placed < starsToPlace; r += 2) {
+          for (let c = 0; c < width - 1 && placed < starsToPlace; c += 2) {
+            const cellId = r * width + c;
+            if (cellId < totalCells) {
+              forcedStars.push(cellId);
+              placed++;
+              // Mark adjacent as empty
+              for (let dr = -1; dr <= 1; dr++) {
+                for (let dc = -1; dc <= 1; dc++) {
+                  if (dr === 0 && dc === 0) continue;
+                  const nr = r + dr;
+                  const nc = c + dc;
+                  if (nr >= 0 && nr < height && nc >= 0 && nc < width) {
+                    const neighborId = nr * width + nc;
+                    if (neighborId < totalCells && !forcedStars.includes(neighborId)) {
+                      forcedEmpties.push(neighborId);
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+        
+        if (forcedStars.length > 0) {
+          configs.push({ forcedStars, forcedEmpties: [...new Set(forcedEmpties)] });
+        }
+      }
+    }
+  } else if (familyId.includes('D1') || familyId.includes('rowColIntersection')) {
+    // For D1: Create row/column intersection scenarios
+    configs.push({ forcedStars: [], forcedEmpties: [] });
+    
+    if (preconditionData?.row !== undefined && preconditionData?.col !== undefined) {
+      // Place stars in row/column to create intersection constraint
+      const row = preconditionData.row;
+      const col = preconditionData.col;
+      
+      // Place a star in the intersection
+      const intersectionCell = row * width + col;
+      if (intersectionCell < totalCells) {
+        const forcedEmpties: number[] = [];
+        // Mark adjacent as empty
+        for (let dr = -1; dr <= 1; dr++) {
+          for (let dc = -1; dc <= 1; dc++) {
+            if (dr === 0 && dc === 0) continue;
+            const r = row + dr;
+            const c = col + dc;
+            if (r >= 0 && r < height && c >= 0 && c < width) {
+              const neighborId = r * width + c;
+              if (neighborId < totalCells) {
+                forcedEmpties.push(neighborId);
+              }
+            }
+          }
+        }
+        configs.push({ forcedStars: [intersectionCell], forcedEmpties });
+      }
+    }
+  } else if (familyId.includes('A1') || familyId.includes('rowBand')) {
+    // For A1: Create configurations that set up the A1 scenario
+    // Need: some regions with stars, some partial regions with known quotas
+    
+    // Config 1: Empty board
+    configs.push({ forcedStars: [], forcedEmpties: [] });
+    
+    // Config 2: Place stars in fully-inside regions to create budget pressure
+    if (preconditionData?.full_inside_regions && preconditionData.full_inside_regions.length > 0) {
+      const fullRegionId = preconditionData.full_inside_regions[0];
+      const fullRegion = state.regions.find(r => r.id === fullRegionId);
+      if (fullRegion && fullRegion.cells.length > 0) {
+        // Place one star in the full region
+        const starCell = fullRegion.cells[0];
+        if (starCell < totalCells) {
+          const emptyCells: number[] = [];
+          // Mark adjacent cells as empty
+          const row = Math.floor(starCell / width);
+          const col = starCell % width;
+          for (let dr = -1; dr <= 1; dr++) {
+            for (let dc = -1; dc <= 1; dc++) {
+              if (dr === 0 && dc === 0) continue;
+              const r = row + dr;
+              const c = col + dc;
+              if (r >= 0 && r < height && c >= 0 && c < width) {
+                const neighborId = r * width + c;
+                if (neighborId < totalCells) {
+                  emptyCells.push(neighborId);
+                }
+              }
+            }
+          }
+          configs.push({ forcedStars: [starCell], forcedEmpties: emptyCells });
+        }
+      }
+    }
+    
+    // Config 3: Multiple stars in full regions
+    if (preconditionData?.full_inside_regions && preconditionData.full_inside_regions.length >= 2) {
+      const forcedStars: number[] = [];
+      const forcedEmpties: number[] = [];
+      
+      for (let i = 0; i < Math.min(2, preconditionData.full_inside_regions.length); i++) {
+        const regionId = preconditionData.full_inside_regions[i];
+        const region = state.regions.find(r => r.id === regionId);
+        if (region && region.cells.length > 0) {
+          const starCell = region.cells[0];
+          if (starCell < totalCells) {
+            forcedStars.push(starCell);
+            // Mark adjacent as empty
+            const row = Math.floor(starCell / width);
+            const col = starCell % width;
+            for (let dr = -1; dr <= 1; dr++) {
+              for (let dc = -1; dc <= 1; dc++) {
+                if (dr === 0 && dc === 0) continue;
+                const r = row + dr;
+                const c = col + dc;
+                if (r >= 0 && r < height && c >= 0 && c < width) {
+                  const neighborId = r * width + c;
+                  if (neighborId < totalCells && !forcedStars.includes(neighborId)) {
+                    forcedEmpties.push(neighborId);
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+      
+      if (forcedStars.length > 0) {
+        configs.push({ forcedStars, forcedEmpties: [...new Set(forcedEmpties)] });
+      }
+    }
+  } else {
+    // Generic configurations
+    configs.push({ forcedStars: [], forcedEmpties: [] });
+    
+    if (totalCells > 0) {
+      configs.push({ forcedStars: [0], forcedEmpties: [] });
+    }
+    
+    if (totalCells > 4) {
+      const starCell = Math.floor(totalCells / 2);
+      const emptyCells: number[] = [];
+      const row = Math.floor(starCell / width);
+      const col = starCell % width;
+      for (let dr = -1; dr <= 1; dr++) {
+        for (let dc = -1; dc <= 1; dc++) {
+          if (dr === 0 && dc === 0) continue;
+          const r = row + dr;
+          const c = col + dc;
+          if (r >= 0 && r < height && c >= 0 && c < width) {
+            const neighborId = r * width + c;
+            if (neighborId < totalCells) {
+              emptyCells.push(neighborId);
+            }
+          }
+        }
+      }
+      configs.push({ forcedStars: [starCell], forcedEmpties: emptyCells });
+    }
+  }
+  
+  return configs;
 }
 
 /**
@@ -46,74 +415,66 @@ export async function generatePatternsForFamily(
         process.stdout.write(`\r    Progress: ${windowsTested}/${windows.length} windows, ${patternsFound} patterns found`);
       }
 
-      // Build abstract board model for window
-      // For mining, we create a simplified board with regions
-      // In full implementation, we'd use actual region data
-      const regionMap = new Map<number, number[]>();
+      // Try different region structures
+      const regionStructures = generateRegionStructures(width, height, familyId);
       
-      // Create a simple region structure for the window
-      // Each row could be a different region, or we could use a grid pattern
-      for (let r = 0; r < height; r++) {
-        const regionId = r + 1;
-        const cells: number[] = [];
-        for (let c = 0; c < width; c++) {
-          const absRow = window.originRow + r;
-          const absCol = window.originCol + c;
-          const absCellId = absRow * boardSize + absCol;
-          cells.push(absCellId);
+      for (const regionMap of regionStructures) {
+        const baseState = buildWindowBoard(window, boardSize, starsPerUnit, regionMap);
+
+        // Test schema preconditions
+        const preconditionTest = testSchemaPreconditions(familyId, baseState, window);
+        
+        if (!preconditionTest.holds) {
+          continue;
         }
-        regionMap.set(regionId, cells);
-      }
 
-      const baseState = buildWindowBoard(window, boardSize, starsPerUnit, regionMap);
-
-      // Test schema preconditions
-      const preconditionTest = testSchemaPreconditions(familyId, baseState, window);
-      
-      if (!preconditionTest.holds) {
-        continue;
-      }
-
-      // Try different initial configurations (forced stars/empties)
-      // This is a simplified approach - full implementation would be more systematic
-      const configurations = generateTestConfigurations(baseState, window, width, height);
-
-      for (const config of configurations) {
-        const testState = applyFixedClues(
+        // Generate configurations based on preconditions
+        const configurations = generateTestConfigurations(
           baseState,
-          config.forcedStars,
-          config.forcedEmpties
-        );
-
-        // Verify pattern using exact solver
-        const verification = await verifyPattern(
-          testState,
           window,
-          [] // Expected deductions - we'll discover them
+          width,
+          height,
+          familyId,
+          preconditionTest.data
         );
 
-        if (verification.verified && verification.actualDeductions.length > 0) {
-          // Normalize pattern (translate to origin)
-          const normalizedData = normalizePattern(window, {
-            ...preconditionTest.data,
-            forcedStars: config.forcedStars,
-            forcedEmpties: config.forcedEmpties,
-          });
+        for (const config of configurations) {
+          const testState = applyFixedClues(
+            baseState,
+            config.forcedStars,
+            config.forcedEmpties
+          );
 
-          // Create pattern
-          const pattern: Pattern = {
-            id: generatePatternId(familyId, patternIdCounter++),
-            familyId,
-            windowWidth: width,
-            windowHeight: height,
-            data: normalizedData,
-            deductions: verification.actualDeductions,
-          };
+          // Verify pattern using exact solver
+          const verification = await verifyPattern(
+            testState,
+            window,
+            [] // Expected deductions - we'll discover them
+          );
 
-          // Canonicalize (handle rotations/mirrors)
-          const canonical = canonicalizePattern(pattern);
-          allPatterns.push(canonical);
-          patternsFound++;
+          if (verification.verified && verification.actualDeductions.length > 0) {
+            // Normalize pattern (translate to origin)
+            const normalizedData = normalizePattern(window, {
+              ...preconditionTest.data,
+              forcedStars: config.forcedStars,
+              forcedEmpties: config.forcedEmpties,
+            });
+
+            // Create pattern
+            const pattern: Pattern = {
+              id: generatePatternId(familyId, patternIdCounter++),
+              familyId,
+              windowWidth: width,
+              windowHeight: height,
+              data: normalizedData,
+              deductions: verification.actualDeductions,
+            };
+
+            // Canonicalize (handle rotations/mirrors)
+            const canonical = canonicalizePattern(pattern);
+            allPatterns.push(canonical);
+            patternsFound++;
+          }
         }
       }
     }
@@ -129,63 +490,6 @@ export async function generatePatternsForFamily(
     familyId,
     patterns: uniquePatterns,
   };
-}
-
-/**
- * Generate test configurations for pattern mining
- * Tries different combinations of forced stars/empties
- */
-function generateTestConfigurations(
-  state: BoardState,
-  window: WindowSpec,
-  width: number,
-  height: number
-): Array<{ forcedStars: number[]; forcedEmpties: number[] }> {
-  const configs: Array<{ forcedStars: number[]; forcedEmpties: number[] }> = [];
-  const totalCells = width * height;
-
-  // Try a few simple configurations
-  // Full implementation would be more systematic
-  
-  // Configuration 1: No forced cells (empty board)
-  configs.push({ forcedStars: [], forcedEmpties: [] });
-
-  // Configuration 2: One forced star in corner
-  if (totalCells > 0) {
-    configs.push({ forcedStars: [0], forcedEmpties: [] });
-  }
-
-  // Configuration 3: Two forced stars (non-adjacent)
-  if (totalCells > 2) {
-    const cell1 = 0;
-    const cell2 = Math.min(2, totalCells - 1); // Non-adjacent
-    configs.push({ forcedStars: [cell1, cell2], forcedEmpties: [] });
-  }
-
-  // Configuration 4: One star, some forced empties around it
-  if (totalCells > 4) {
-    const starCell = Math.floor(totalCells / 2);
-    const emptyCells: number[] = [];
-    // Add some adjacent cells as empty
-    const row = Math.floor(starCell / width);
-    const col = starCell % width;
-    for (let dr = -1; dr <= 1; dr++) {
-      for (let dc = -1; dc <= 1; dc++) {
-        if (dr === 0 && dc === 0) continue;
-        const r = row + dr;
-        const c = col + dc;
-        if (r >= 0 && r < height && c >= 0 && c < width) {
-          const neighborId = r * width + c;
-          if (neighborId < totalCells) {
-            emptyCells.push(neighborId);
-          }
-        }
-      }
-    }
-    configs.push({ forcedStars: [starCell], forcedEmpties: emptyCells });
-  }
-
-  return configs;
 }
 
 /**

@@ -2,7 +2,7 @@
  * Pattern deduplication utilities
  */
 
-import type { Pattern } from '../model/types';
+import type { Pattern } from '../model/types.js';
 
 /**
  * Generate a canonical key for a pattern (for deduplication)

@@ -3,9 +3,9 @@
  * Creates abstract board models for windows
  */
 
-import type { WindowSpec } from '../model/types';
-import type { BoardState } from '../solver/exactSolver';
-import { CellState } from '../solver/exactSolver';
+import type { WindowSpec } from '../model/types.js';
+import type { BoardState } from '../solver/exactSolver.js';
+import { CellState } from '../solver/exactSolver.js';
 
 /**
  * Build a minimal board state for a window

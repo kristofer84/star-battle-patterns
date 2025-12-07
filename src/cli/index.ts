@@ -2,8 +2,8 @@
  * CLI entry point for pattern miner
  */
 
-import { generateAllPatterns } from '../miner/patternGenerator';
-import { generateAllPatternLibraryFiles } from '../miner/patternLibrary';
+import { generateAllPatterns } from '../miner/patternGenerator.js';
+import { generateAllPatternLibraryFiles } from '../miner/patternLibrary.js';
 import { join } from 'path';
 
 async function main() {
@@ -15,7 +15,14 @@ async function main() {
   const args = process.argv.slice(2);
   let boardSize = 10;
   let starsPerUnit = 2;
-  let families: string[] = ['A1_rowBand_regionBudget', 'A2_colBand_regionBudget', 'C2_cages_regionQuota'];
+  let families: string[] = [
+    'E1_candidateDeficit',
+    'A1_rowBand_regionBudget',
+    'A2_colBand_regionBudget',
+    'C1_bandExactCages',
+    'C2_cages_regionQuota',
+    'D1_rowColIntersection',
+  ];
   let outputDir = join(process.cwd(), 'output');
 
   for (let i = 0; i < args.length; i++) {
@@ -68,8 +75,4 @@ async function main() {
 }
 
 main();
-
-// TODO: Implement CLI argument parsing
-// TODO: Implement pattern mining
-// TODO: Generate pattern files
 

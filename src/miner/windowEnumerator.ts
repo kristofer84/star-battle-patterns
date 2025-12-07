@@ -2,7 +2,7 @@
  * Window enumeration for pattern mining
  */
 
-import type { WindowSpec } from '../model/types';
+import type { WindowSpec } from '../model/types.js';
 
 /**
  * Enumerate all windows of given size

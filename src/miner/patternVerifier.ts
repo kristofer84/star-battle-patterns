@@ -2,9 +2,9 @@
  * Pattern verifier - verifies patterns using exact solver
  */
 
-import type { Pattern, WindowSpec } from '../model/types';
-import type { BoardState } from '../solver/exactSolver';
-import { enumerateAllCompletions, CellState } from '../solver/exactSolver';
+import type { Pattern, WindowSpec } from '../model/types.js';
+import type { BoardState } from '../solver/exactSolver.js';
+import { enumerateAllCompletions, CellState } from '../solver/exactSolver.js';
 
 /**
  * Verify a pattern using exact solver

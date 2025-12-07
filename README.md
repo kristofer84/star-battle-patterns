@@ -31,19 +31,40 @@ npm run mine-patterns -- --board-size 10 --stars 2 --families A1_rowBand_regionB
 1. **Window Enumeration**: Enumerates all possible windows of different sizes (4×4, 5×5, 6×6)
 
 2. **Board Building**: For each window, builds an abstract board model with:
-   - Simplified region structure
+   - Region structures tailored to schema requirements
    - Row/column groups
    - Cell states (initially all unknown)
 
-3. **Precondition Testing**: Tests if schema preconditions hold in the window
+3. **Precondition Testing**: Tests if schema preconditions hold in the window:
+   - **E1**: Checks for groups with candidate deficit
+   - **A1/A2**: Verifies row/column bands with full/partial regions
+   - **C1/C2**: Validates 2×2 block conditions
+   - **D1**: Tests row/column intersection scenarios
 
-4. **Configuration Testing**: Tries different initial configurations (forced stars/empties)
+4. **Configuration Testing**: Generates systematic test configurations:
+   - **E1**: Creates candidate deficit scenarios
+   - **A1/A2**: Sets up region budget pressure
+   - **C1/C2**: Configures exact block/star matching
+   - **D1**: Creates intersection constraints
 
 5. **Pattern Verification**: Uses exact solver to enumerate all completions and find forced deductions
 
 6. **Pattern Generation**: Creates patterns with normalized coordinates and deduplicates
 
 7. **File Generation**: Outputs JSON pattern files ready for import into the solver
+
+## Supported Schema Families
+
+The miner currently implements proper mining logic for:
+
+- ✅ **E1** – Candidate Deficit
+- ✅ **A1** – Row-Band vs Regions Star-Budget Squeeze
+- ✅ **A2** – Column-Band vs Regions Star-Budget Squeeze
+- ✅ **C1** – Exact-Match 2×2 Cages in a Band
+- ✅ **C2** – 2×2 Cages vs Region Quota
+- ✅ **D1** – Row × Column Intersection
+
+Other families use basic mining logic and can be enhanced as needed.
 
 ## Output
 

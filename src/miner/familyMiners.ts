@@ -3,8 +3,8 @@
  * Each schema family may need specialized mining logic
  */
 
-import type { BoardState } from '../solver/exactSolver';
-import type { WindowSpec } from '../model/types';
+import type { BoardState } from '../solver/exactSolver.js';
+import type { WindowSpec } from '../model/types.js';
 
 /**
  * Mine patterns for A1 family (row-band region budget)

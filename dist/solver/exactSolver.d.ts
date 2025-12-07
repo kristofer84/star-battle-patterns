@@ -27,6 +27,8 @@ export interface BoardState {
         cells: number[];
         starsRequired: number;
     }>;
+    windowWidth?: number;
+    windowHeight?: number;
 }
 export interface CompletionAnalysis {
     cellResults: Map<number, 'alwaysStar' | 'alwaysEmpty' | 'variable'>;

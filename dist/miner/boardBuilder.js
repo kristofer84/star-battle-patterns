@@ -43,9 +43,10 @@ export function buildWindowBoard(window, boardSize, starsPerUnit, regionMap // r
     }
     // Build regions for the window
     const regions = [];
-    if (regionMap) {
+    if (regionMap && regionMap.size > 0) {
         for (const [regionId, cellIds] of regionMap.entries()) {
-            // Map absolute cell IDs to relative window cell IDs
+            // The cellIds are already in absolute coordinates from the full board
+            // We need to map them to relative window coordinates
             const windowCellIds = [];
             for (const absCellId of cellIds) {
                 const absRow = Math.floor(absCellId / boardSize);
@@ -58,10 +59,33 @@ export function buildWindowBoard(window, boardSize, starsPerUnit, regionMap // r
                 }
             }
             if (windowCellIds.length > 0) {
+                // Calculate region quota based on how many rows it spans
+                // In Star Battle, if a region spans N rows, it typically needs N * starsPerUnit stars
+                // But we need to be careful - count unique rows in the region
+                const rowsInRegion = new Set();
+                for (const cellId of windowCellIds) {
+                    const row = Math.floor(cellId / width);
+                    rowsInRegion.add(row);
+                }
+                // If region covers entire window, quota = height * starsPerUnit
+                // Otherwise, estimate based on rows spanned
+                let regionQuota = starsPerUnit;
+                if (windowCellIds.length === width * height) {
+                    // Full window region
+                    regionQuota = height * starsPerUnit;
+                }
+                else if (rowsInRegion.size > 1) {
+                    // Multi-row region - use rows spanned
+                    regionQuota = rowsInRegion.size * starsPerUnit;
+                }
+                else {
+                    // Single-row region
+                    regionQuota = starsPerUnit;
+                }
                 regions.push({
                     id: regionId,
                     cells: windowCellIds,
-                    starsRequired: starsPerUnit,
+                    starsRequired: regionQuota,
                 });
             }
         }
@@ -72,10 +96,11 @@ export function buildWindowBoard(window, boardSize, starsPerUnit, regionMap // r
         for (let i = 0; i < width * height; i++) {
             allCells.push(i);
         }
+        // Full window region needs quota = height * starsPerUnit (or width * starsPerUnit, should be same)
         regions.push({
             id: 1,
             cells: allCells,
-            starsRequired: starsPerUnit,
+            starsRequired: height * starsPerUnit,
         });
     }
     // For window boards, size should match the window dimensions
@@ -84,8 +109,9 @@ export function buildWindowBoard(window, boardSize, starsPerUnit, regionMap // r
     const windowSize = Math.max(width, height);
     // For window boards, we use the window dimensions
     // Cell IDs are 0 to (width * height - 1), relative to window
-    // But we need a "size" that's at least as large as the largest dimension
-    // for neighbor calculations
+    // The size should be at least as large as the largest dimension for neighbor calculations
+    // But we need to ensure neighbor calculations work correctly
+    // Use width for neighbor calculations (cells are laid out as r * width + c)
     const effectiveSize = Math.max(width, height);
     return {
         size: effectiveSize,
@@ -95,6 +121,9 @@ export function buildWindowBoard(window, boardSize, starsPerUnit, regionMap // r
         regions,
         rows,
         cols,
+        // Store window dimensions for correct neighbor calculations
+        windowWidth: width,
+        windowHeight: height,
     };
 }
 /**

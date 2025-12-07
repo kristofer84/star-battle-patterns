@@ -1,7 +1,7 @@
 /**
  * Pattern generator - main mining loop
  */
-import { CellState } from '../solver/exactSolver.js';
+import { CellState, enumerateAllCompletions } from '../solver/exactSolver.js';
 import { enumerateWindows } from './windowEnumerator.js';
 import { verifyPattern } from './patternVerifier.js';
 import { buildWindowBoard, applyFixedClues } from './boardBuilder.js';
@@ -33,24 +33,34 @@ function generateRegionStructures(width, height, familyId) {
         structures.push(structure);
     }
     else if (familyId.includes('C1') || familyId.includes('exactCages')) {
-        // For C1: Need regions that work with 2x2 blocks
-        const structure = new Map();
-        // Create regions that align with 2x2 blocks
-        let regionId = 1;
-        for (let r = 0; r < height; r += 2) {
-            for (let c = 0; c < width; c += 2) {
-                const cells = [];
-                for (let dr = 0; dr < 2 && r + dr < height; dr++) {
-                    for (let dc = 0; dc < 2 && c + dc < width; dc++) {
-                        cells.push((r + dr) * width + (c + dc));
+        // For C1: Try simpler structures first (row-based) which are more likely solvable
+        // Structure 1: Simple row-based (most solvable)
+        const structure1 = new Map();
+        for (let r = 0; r < height; r++) {
+            const cells = [];
+            for (let c = 0; c < width; c++) {
+                cells.push(r * width + c);
+            }
+            structure1.set(r + 1, cells);
+        }
+        structures.push(structure1);
+        // Structure 2: 2x2 block-aligned (if window is large enough and even-sized)
+        if (width >= 4 && height >= 4 && width % 2 === 0 && height % 2 === 0) {
+            const structure2 = new Map();
+            let regionId = 1;
+            for (let r = 0; r < height; r += 2) {
+                for (let c = 0; c < width; c += 2) {
+                    const cells = [];
+                    for (let dr = 0; dr < 2; dr++) {
+                        for (let dc = 0; dc < 2; dc++) {
+                            cells.push((r + dr) * width + (c + dc));
+                        }
                     }
-                }
-                if (cells.length > 0) {
-                    structure.set(regionId++, cells);
+                    structure2.set(regionId++, cells);
                 }
             }
+            structures.push(structure2);
         }
-        structures.push(structure);
     }
     else if (familyId.includes('D1') || familyId.includes('rowColIntersection')) {
         // For D1: Simple row/column structure
@@ -385,14 +395,199 @@ export async function generatePatternsForFamily(familyId, boardSize, starsPerUni
             for (const regionMap of regionStructures) {
                 const baseState = buildWindowBoard(window, boardSize, starsPerUnit, regionMap);
                 // Test schema preconditions
+                // For E1, we create the condition ourselves, so preconditions may not hold initially
+                // For other families, preconditions must hold
                 const preconditionTest = testSchemaPreconditions(familyId, baseState, window);
-                if (!preconditionTest.holds) {
-                    continue;
+                if (!familyId.includes('E1') && !familyId.includes('candidateDeficit')) {
+                    // For non-E1 families, preconditions must hold
+                    if (!preconditionTest.holds) {
+                        continue;
+                    }
+                }
+                // For E1, we proceed even if preconditions don't hold (we'll create the condition)
+                // For E1, use a constraint-aware approach
+                // The key insight: E1 patterns occur when a group has exactly N candidates and needs N stars
+                // We need to create this condition while maintaining board solvability
+                if (familyId.includes('E1') || familyId.includes('candidateDeficit')) {
+                    // Store starsPerUnit for use in E1 pattern generation  
+                    const currentStarsPerUnit = starsPerUnit;
+                    // Strategy: For each group, try to create E1 condition by placing empties
+                    // But only if doing so maintains solvability
+                    // First verify the base board is solvable (quick check)
+                    // Use longer timeout for larger windows - 10x10 with 2 stars needs more time
+                    const baseTimeout = (width >= 10 || height >= 10) ? 10000 : 3000;
+                    const baseSolvability = enumerateAllCompletions(baseState, 1, baseTimeout);
+                    if (baseSolvability.totalCompletions === 0) {
+                        continue; // Base board is unsolvable, skip this window/region structure
+                    }
+                    // For 10x10 windows, we know they're solvable, so proceed with pattern generation
+                    // Try creating E1 patterns for rows
+                    for (const row of baseState.rows) {
+                        if (patternsFound >= 10)
+                            break;
+                        const candidates = row.cells.filter(c => baseState.cellStates[c] === CellState.Unknown);
+                        if (candidates.length <= row.starsRequired)
+                            continue;
+                        const emptiesToPlace = candidates.length - row.starsRequired;
+                        // For starsPerUnit >= 2, we need to try more combinations
+                        // because placing empties is more likely to break solvability
+                        // For 10x10 windows, try even more combinations
+                        const maxAttempts = currentStarsPerUnit >= 2
+                            ? (width >= 10 || height >= 10)
+                                ? Math.min(50, Math.floor(candidates.length / 2)) // More attempts for large windows
+                                : Math.min(30, Math.floor(candidates.length / 2))
+                            : Math.min(5, candidates.length - emptiesToPlace + 1);
+                        // Try placing empties in different combinations
+                        for (let attempt = 0; attempt < maxAttempts; attempt++) {
+                            // Try different strategies for selecting empties
+                            const forcedEmpties = [];
+                            if (currentStarsPerUnit >= 2) {
+                                // For higher star counts, try spacing empties out
+                                // Strategy: place empties with gaps to maintain flexibility
+                                const step = Math.max(1, Math.floor(candidates.length / emptiesToPlace));
+                                for (let i = 0; i < emptiesToPlace; i++) {
+                                    const idx = (attempt + i * step) % candidates.length;
+                                    if (!forcedEmpties.includes(candidates[idx])) {
+                                        forcedEmpties.push(candidates[idx]);
+                                    }
+                                    if (forcedEmpties.length >= emptiesToPlace)
+                                        break;
+                                }
+                                // If we didn't get enough, fill with remaining candidates
+                                while (forcedEmpties.length < emptiesToPlace && forcedEmpties.length < candidates.length) {
+                                    for (const c of candidates) {
+                                        if (!forcedEmpties.includes(c)) {
+                                            forcedEmpties.push(c);
+                                            break;
+                                        }
+                                    }
+                                }
+                            }
+                            else {
+                                // For starsPerUnit = 1, use simple sequential approach
+                                for (let i = 0; i < emptiesToPlace; i++) {
+                                    const idx = (attempt + i) % candidates.length;
+                                    forcedEmpties.push(candidates[idx]);
+                                }
+                            }
+                            if (forcedEmpties.length !== emptiesToPlace)
+                                continue;
+                            const testState = applyFixedClues(baseState, [], forcedEmpties);
+                            // Critical: check solvability BEFORE checking E1 condition
+                            // Use longer timeout for larger windows
+                            const solvabilityTimeout = (width >= 10 || height >= 10) ? 5000 : 3000;
+                            const solvabilityCheck = enumerateAllCompletions(testState, 1, solvabilityTimeout);
+                            if (solvabilityCheck.totalCompletions === 0) {
+                                continue; // Skip unsolvable configurations
+                            }
+                            // Now check if E1 condition holds
+                            // Use the actual familyId, not hardcoded string
+                            const e1Check = testSchemaPreconditions(familyId, testState, window);
+                            if (!e1Check.holds) {
+                                continue;
+                            }
+                            // Verify pattern produces forced deductions
+                            const verification = await verifyPattern(testState, window, []);
+                            if (verification.verified && verification.actualDeductions.length > 0) {
+                                const pattern = {
+                                    id: generatePatternId(familyId, patternIdCounter++),
+                                    familyId,
+                                    windowWidth: width,
+                                    windowHeight: height,
+                                    data: {
+                                        group_type: 'row',
+                                        group_id: row.rowIndex,
+                                        forced_empties: forcedEmpties,
+                                    },
+                                    deductions: verification.actualDeductions,
+                                };
+                                const canonical = canonicalizePattern(pattern);
+                                allPatterns.push(canonical);
+                                patternsFound++;
+                                break; // Found one pattern for this row
+                            }
+                        }
+                    }
+                    // Also try columns (similar logic)
+                    for (const col of baseState.cols) {
+                        if (patternsFound >= 10)
+                            break;
+                        const candidates = col.cells.filter(c => baseState.cellStates[c] === CellState.Unknown);
+                        if (candidates.length <= col.starsRequired)
+                            continue;
+                        const emptiesToPlace = candidates.length - col.starsRequired;
+                        const maxAttempts = currentStarsPerUnit >= 2
+                            ? Math.min(25, Math.floor(candidates.length / 2))
+                            : Math.min(3, candidates.length - emptiesToPlace + 1);
+                        for (let attempt = 0; attempt < maxAttempts; attempt++) {
+                            const forcedEmpties = [];
+                            if (currentStarsPerUnit >= 2) {
+                                const step = Math.max(1, Math.floor(candidates.length / emptiesToPlace));
+                                for (let i = 0; i < emptiesToPlace; i++) {
+                                    const idx = (attempt + i * step) % candidates.length;
+                                    if (!forcedEmpties.includes(candidates[idx])) {
+                                        forcedEmpties.push(candidates[idx]);
+                                    }
+                                    if (forcedEmpties.length >= emptiesToPlace)
+                                        break;
+                                }
+                                while (forcedEmpties.length < emptiesToPlace && forcedEmpties.length < candidates.length) {
+                                    for (const c of candidates) {
+                                        if (!forcedEmpties.includes(c)) {
+                                            forcedEmpties.push(c);
+                                            break;
+                                        }
+                                    }
+                                }
+                            }
+                            else {
+                                for (let i = 0; i < emptiesToPlace; i++) {
+                                    const idx = (attempt + i) % candidates.length;
+                                    forcedEmpties.push(candidates[idx]);
+                                }
+                            }
+                            if (forcedEmpties.length !== emptiesToPlace)
+                                continue;
+                            const testState = applyFixedClues(baseState, [], forcedEmpties);
+                            const solvabilityCheck = enumerateAllCompletions(testState, 1, 3000);
+                            if (solvabilityCheck.totalCompletions === 0)
+                                continue;
+                            const e1Check = testSchemaPreconditions(familyId, testState, window);
+                            if (!e1Check.holds)
+                                continue;
+                            const verification = await verifyPattern(testState, window, []);
+                            if (verification.verified && verification.actualDeductions.length > 0) {
+                                const pattern = {
+                                    id: generatePatternId(familyId, patternIdCounter++),
+                                    familyId,
+                                    windowWidth: width,
+                                    windowHeight: height,
+                                    data: {
+                                        group_type: 'column',
+                                        group_id: col.colIndex,
+                                        forced_empties: forcedEmpties,
+                                    },
+                                    deductions: verification.actualDeductions,
+                                };
+                                const canonical = canonicalizePattern(pattern);
+                                allPatterns.push(canonical);
+                                patternsFound++;
+                                break;
+                            }
+                        }
+                    }
+                    continue; // Skip normal config generation for E1
                 }
                 // Generate configurations based on preconditions
                 const configurations = generateTestConfigurations(baseState, window, width, height, familyId, preconditionTest.data);
                 for (const config of configurations) {
+                    // Check solvability first
                     const testState = applyFixedClues(baseState, config.forcedStars, config.forcedEmpties);
+                    // Quick solvability check
+                    const solvabilityCheck = enumerateAllCompletions(testState, 1, 2000);
+                    if (solvabilityCheck.totalCompletions === 0) {
+                        continue; // Skip unsolvable configurations
+                    }
                     // Verify pattern using exact solver
                     const verification = await verifyPattern(testState, window, [] // Expected deductions - we'll discover them
                     );
@@ -416,6 +611,9 @@ export async function generatePatternsForFamily(familyId, boardSize, starsPerUni
                         const canonical = canonicalizePattern(pattern);
                         allPatterns.push(canonical);
                         patternsFound++;
+                        if (patternsFound >= 10) {
+                            break; // Limit patterns per window
+                        }
                     }
                 }
             }
@@ -434,11 +632,21 @@ export async function generatePatternsForFamily(familyId, boardSize, starsPerUni
  * Generate all patterns
  */
 export async function generateAllPatterns(boardSize, starsPerUnit, families) {
-    const windowSizes = [
-        { width: 4, height: 4 },
-        { width: 5, height: 5 },
-        { width: 6, height: 6 },
-    ];
+    // Use appropriate window sizes based on starsPerUnit
+    // With 1 star per unit: smaller windows work fine
+    // With 2 stars per unit: need larger windows (8x8+) to ensure solvability
+    // Testing shows: 6x6 and 7x7 are unsolvable with 2 stars/unit, but 8x8+ are solvable
+    const windowSizes = starsPerUnit >= 2
+        ? [
+            { width: 8, height: 8 },
+            { width: 9, height: 9 },
+            { width: 10, height: 10 },
+        ]
+        : [
+            { width: 4, height: 4 },
+            { width: 5, height: 5 },
+            { width: 6, height: 6 },
+        ];
     const results = [];
     for (const familyId of families) {
         console.log(`\nMining patterns for family ${familyId}...`);

@@ -25,6 +25,7 @@ async function main() {
   ];
   let outputDir = join(process.cwd(), 'output');
 
+  // Parse arguments (support both --flag value and positional)
   for (let i = 0; i < args.length; i++) {
     if (args[i] === '--board-size' && args[i + 1]) {
       boardSize = parseInt(args[i + 1], 10);
@@ -32,12 +33,26 @@ async function main() {
     } else if (args[i] === '--stars' && args[i + 1]) {
       starsPerUnit = parseInt(args[i + 1], 10);
       i++;
+    } else if (args[i] === '--family' && args[i + 1]) {
+      families = [args[i + 1]];
+      i++;
     } else if (args[i] === '--families' && args[i + 1]) {
       families = args[i + 1].split(',');
       i++;
     } else if (args[i] === '--output' && args[i + 1]) {
       outputDir = args[i + 1];
       i++;
+    } else if (args[i] === '--max-patterns' && args[i + 1]) {
+      // Ignore for now, but parse it
+      i++;
+    }
+    // Also support positional args for backward compatibility
+    else if (i === 0 && !isNaN(parseInt(args[i], 10))) {
+      boardSize = parseInt(args[i], 10);
+    } else if (i === 1 && !isNaN(parseInt(args[i], 10))) {
+      starsPerUnit = parseInt(args[i], 10);
+    } else if (i === 2 && args[i]) {
+      families = [args[i]];
     }
   }
 

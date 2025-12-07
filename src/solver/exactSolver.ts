@@ -17,6 +17,8 @@ export interface BoardState {
   regions: Array<{ id: number; cells: number[]; starsRequired: number }>;
   rows: Array<{ rowIndex: number; cells: number[]; starsRequired: number }>;
   cols: Array<{ colIndex: number; cells: number[]; starsRequired: number }>;
+  windowWidth?: number; // For window boards
+  windowHeight?: number; // For window boards
 }
 
 export interface CompletionAnalysis {
@@ -27,9 +29,13 @@ export interface CompletionAnalysis {
 /**
  * Get 8-directional neighbors
  */
-function getNeighbors8(cellId: number, size: number): Array<{ row: number; col: number }> {
-  const row = Math.floor(cellId / size);
-  const col = cellId % size;
+function getNeighbors8(cellId: number, state: BoardState): Array<{ row: number; col: number }> {
+  // For window boards, use windowWidth; otherwise use size
+  const width = state.windowWidth || state.size;
+  const height = state.windowHeight || state.size;
+  
+  const row = Math.floor(cellId / width);
+  const col = cellId % width;
   const neighbors: Array<{ row: number; col: number }> = [];
   
   for (let dr = -1; dr <= 1; dr++) {
@@ -37,7 +43,7 @@ function getNeighbors8(cellId: number, size: number): Array<{ row: number; col: 
       if (dr === 0 && dc === 0) continue;
       const r = row + dr;
       const c = col + dc;
-      if (r >= 0 && r < size && c >= 0 && c < size) {
+      if (r >= 0 && r < height && c >= 0 && c < width) {
         neighbors.push({ row: r, col: c });
       }
     }
@@ -75,12 +81,14 @@ function isValidCompletion(state: BoardState): boolean {
   }
   
   // Check adjacency
-  for (let i = 0; i < state.size * state.size; i++) {
+  const width = state.windowWidth || state.size;
+  const totalCells = state.cellStates.length;
+  for (let i = 0; i < totalCells; i++) {
     if (state.cellStates[i] === CellState.Star) {
-      const neighbors = getNeighbors8(i, state.size);
+      const neighbors = getNeighbors8(i, state);
       for (const neighbor of neighbors) {
-        const neighborId = neighbor.row * state.size + neighbor.col;
-        if (state.cellStates[neighborId] === CellState.Star) {
+        const neighborId = neighbor.row * width + neighbor.col;
+        if (neighborId < totalCells && state.cellStates[neighborId] === CellState.Star) {
           return false;
         }
       }
@@ -122,12 +130,14 @@ function isValidPartialState(state: BoardState): boolean {
   }
   
   // Check adjacency
-  for (let i = 0; i < state.size * state.size; i++) {
+  const width = state.windowWidth || state.size;
+  const totalCells = state.cellStates.length;
+  for (let i = 0; i < totalCells; i++) {
     if (state.cellStates[i] === CellState.Star) {
-      const neighbors = getNeighbors8(i, state.size);
+      const neighbors = getNeighbors8(i, state);
       for (const neighbor of neighbors) {
-        const neighborId = neighbor.row * state.size + neighbor.col;
-        if (state.cellStates[neighborId] === CellState.Star) {
+        const neighborId = neighbor.row * width + neighbor.col;
+        if (neighborId < totalCells && state.cellStates[neighborId] === CellState.Star) {
           return false;
         }
       }
@@ -159,10 +169,10 @@ export function enumerateAllCompletions(
 ): CompletionAnalysis {
   const startTime = Date.now();
   const cellResults = new Map<number, Set<CellState>>();
-  const size = state.size;
+  const totalCells = state.cellStates.length;
   
   // Initialize cell results tracking
-  for (let i = 0; i < size * size; i++) {
+  for (let i = 0; i < totalCells; i++) {
     cellResults.set(i, new Set());
   }
   
@@ -182,7 +192,7 @@ export function enumerateAllCompletions(
     
     // Find next unknown cell
     let nextCell: number | null = null;
-    for (let i = 0; i < size * size; i++) {
+    for (let i = 0; i < currentState.cellStates.length; i++) {
       if (currentState.cellStates[i] === CellState.Unknown) {
         nextCell = i;
         break;
@@ -193,7 +203,7 @@ export function enumerateAllCompletions(
     if (nextCell === null) {
       if (isValidCompletion(currentState)) {
         // Record this completion
-        for (let i = 0; i < size * size; i++) {
+        for (let i = 0; i < currentState.cellStates.length; i++) {
           const cellState = currentState.cellStates[i];
           cellResults.get(i)!.add(cellState);
         }
@@ -215,6 +225,16 @@ export function enumerateAllCompletions(
     }
   }
   
+  // Add debug mode
+  const DEBUG = process.env.DEBUG_SOLVER === '1';
+  if (DEBUG) {
+    console.log('Starting solver with state:');
+    console.log(`  Total cells: ${state.cellStates.length}`);
+    console.log(`  Unknown cells: ${state.cellStates.filter(s => s === CellState.Unknown).length}`);
+    console.log(`  Stars: ${state.cellStates.filter(s => s === CellState.Star).length}`);
+    console.log(`  Empties: ${state.cellStates.filter(s => s === CellState.Empty).length}`);
+  }
+  
   // Start solving
   solve(state, 0);
   
@@ -224,7 +244,7 @@ export function enumerateAllCompletions(
     totalCompletions: completionCount,
   };
   
-  for (let i = 0; i < size * size; i++) {
+  for (let i = 0; i < totalCells; i++) {
     const states = cellResults.get(i)!;
     if (states.size === 0) {
       analysis.cellResults.set(i, 'variable');

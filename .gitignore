@@ -1,0 +1,6 @@
+.gitignorenode_modules
+vitest-example-*
+local
+.vscode
+**/dist
+**/output

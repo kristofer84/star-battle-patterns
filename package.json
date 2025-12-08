@@ -9,6 +9,7 @@
     "mine-patterns": "node dist/cli/index.js",
     "test": "node dist/cli/test.js",
     "test:simple": "npm run build && node dist/cli/test.js",
+    "test:patterns": "npm run build && node dist/cli/testPatterns.js",
     "test:solver": "npm run build && node dist/cli/testSolver.js",
     "test:valid": "npm run build && node dist/cli/testValid.js",
     "test:manual": "npm run build && node dist/cli/testManual.js",

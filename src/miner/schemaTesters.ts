@@ -479,6 +479,173 @@ export function testD1Preconditions(
 }
 
 /**
+ * Test if C3 (region-local cages) preconditions hold
+ * C3 requires:
+ * - A band (row or column) intersecting a region
+ * - Valid 2×2 blocks fully inside region ∩ band
+ * - Region has quota > 0 in the band
+ */
+export function testC3Preconditions(
+  state: BoardState,
+  window: WindowSpec
+): { holds: boolean; data?: any } {
+  if (window.width < 2 || window.height < 2) {
+    return { holds: false };
+  }
+  
+  if (state.regions.length === 0) {
+    return { holds: false };
+  }
+  
+  const width = window.width;
+  const height = window.height;
+  
+  // C3 works on region ∩ band intersections
+  // Check for regions that have valid 2×2 blocks fully inside them
+  // and that intersect with a band (row band or column band)
+  
+  const regionBlockCounts = new Map<number, number>();
+  const regionBandData = new Map<number, { blocks: number; rowBand?: number[]; colBand?: number[] }>();
+  
+  // Check row bands
+  for (let bandStart = 0; bandStart < height; bandStart++) {
+    for (let bandEnd = bandStart; bandEnd < height; bandEnd++) {
+      if (bandEnd - bandStart < 1) continue; // Need at least 2 rows for a band
+      
+      const bandRows = Array.from({ length: bandEnd - bandStart + 1 }, (_, i) => bandStart + i);
+      
+      // For each region, count blocks fully inside region ∩ band
+      for (const region of state.regions) {
+        const regionCellSet = new Set(region.cells);
+        let blocksInRegionBand = 0;
+        
+        // Count blocks fully inside this region and in the band
+        for (let r = bandStart; r < bandEnd && r < height - 1; r++) {
+          for (let c = 0; c < width - 1; c++) {
+            const topLeft = r * width + c;
+            const topRight = r * width + (c + 1);
+            const bottomLeft = (r + 1) * width + c;
+            const bottomRight = (r + 1) * width + (c + 1);
+            
+            // Check if all 4 cells are in region
+            const allInRegion = 
+              regionCellSet.has(topLeft) &&
+              regionCellSet.has(topRight) &&
+              regionCellSet.has(bottomLeft) &&
+              regionCellSet.has(bottomRight);
+            
+            if (allInRegion) {
+              // Check if block has at least one candidate
+              const hasCandidate = 
+                state.cellStates[topLeft] === CellState.Unknown ||
+                state.cellStates[topRight] === CellState.Unknown ||
+                state.cellStates[bottomLeft] === CellState.Unknown ||
+                state.cellStates[bottomRight] === CellState.Unknown;
+              
+              if (hasCandidate) {
+                blocksInRegionBand++;
+              }
+            }
+          }
+        }
+        
+        if (blocksInRegionBand > 0) {
+          const existing = regionBandData.get(region.id) || { blocks: 0 };
+          if (blocksInRegionBand > existing.blocks) {
+            regionBandData.set(region.id, {
+              blocks: blocksInRegionBand,
+              rowBand: bandRows,
+            });
+          }
+        }
+      }
+    }
+  }
+  
+  // Check column bands (similar logic)
+  for (let bandStart = 0; bandStart < width; bandStart++) {
+    for (let bandEnd = bandStart; bandEnd < width; bandEnd++) {
+      if (bandEnd - bandStart < 1) continue; // Need at least 2 cols for a band
+      
+      const bandCols = Array.from({ length: bandEnd - bandStart + 1 }, (_, i) => bandStart + i);
+      
+      for (const region of state.regions) {
+        const regionCellSet = new Set(region.cells);
+        let blocksInRegionBand = 0;
+        
+        for (let r = 0; r < height - 1; r++) {
+          for (let c = bandStart; c < bandEnd && c < width - 1; c++) {
+            const topLeft = r * width + c;
+            const topRight = r * width + (c + 1);
+            const bottomLeft = (r + 1) * width + c;
+            const bottomRight = (r + 1) * width + (c + 1);
+            
+            const allInRegion = 
+              regionCellSet.has(topLeft) &&
+              regionCellSet.has(topRight) &&
+              regionCellSet.has(bottomLeft) &&
+              regionCellSet.has(bottomRight);
+            
+            if (allInRegion) {
+              const hasCandidate = 
+                state.cellStates[topLeft] === CellState.Unknown ||
+                state.cellStates[topRight] === CellState.Unknown ||
+                state.cellStates[bottomLeft] === CellState.Unknown ||
+                state.cellStates[bottomRight] === CellState.Unknown;
+              
+              if (hasCandidate) {
+                blocksInRegionBand++;
+              }
+            }
+          }
+        }
+        
+        if (blocksInRegionBand > 0) {
+          const existing = regionBandData.get(region.id) || { blocks: 0 };
+          if (blocksInRegionBand > existing.blocks) {
+            regionBandData.set(region.id, {
+              blocks: blocksInRegionBand,
+              colBand: bandCols,
+            });
+          }
+        }
+      }
+    }
+  }
+  
+  // Find regions with valid blocks
+  const validRegions: Array<{ id: number; blocks: number; rowBand?: number[]; colBand?: number[] }> = [];
+  for (const [regionId, data] of regionBandData.entries()) {
+    if (data.blocks > 0) {
+      validRegions.push({
+        id: regionId,
+        blocks: data.blocks,
+        rowBand: data.rowBand,
+        colBand: data.colBand,
+      });
+    }
+  }
+  
+  if (validRegions.length === 0) {
+    return { holds: false };
+  }
+  
+  // Return data about regions with valid blocks
+  return {
+    holds: true,
+    data: {
+      regions: validRegions.map(r => ({
+        id: r.id,
+        blocks: r.blocks,
+        row_band: r.rowBand,
+        col_band: r.colBand,
+      })),
+      total_valid_blocks: countValidBlocks(state, window),
+    },
+  };
+}
+
+/**
  * Test schema preconditions for a family
  */
 export function testSchemaPreconditions(
@@ -497,6 +664,8 @@ export function testSchemaPreconditions(
     case 'C2_cages_regionQuota':
     case 'C2_cages_regionQuota':
       return testC2Preconditions(state, window);
+    case 'C3_regionLocalCages':
+      return testC3Preconditions(state, window);
     case 'E1_candidateDeficit':
       return testE1Preconditions(state, window);
     case 'D1_rowColIntersection':

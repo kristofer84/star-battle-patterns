@@ -39,12 +39,14 @@ npm run mine-patterns -- --board-size 10 --stars 2 --families A1_rowBand_regionB
    - **E1**: Checks for groups with candidate deficit
    - **A1/A2**: Verifies row/column bands with full/partial regions
    - **C1/C2**: Validates 2×2 block conditions
+   - **C3**: Checks for region-local 2×2 blocks with exact-cover packing
    - **D1**: Tests row/column intersection scenarios
 
 4. **Configuration Testing**: Generates systematic test configurations:
    - **E1**: Creates candidate deficit scenarios
    - **A1/A2**: Sets up region budget pressure
    - **C1/C2**: Configures exact block/star matching
+   - **C3**: Sets up region-band intersections with exact-cover packing scenarios
    - **D1**: Creates intersection constraints
 
 5. **Pattern Verification**: Uses exact solver to enumerate all completions and find forced deductions
@@ -62,6 +64,7 @@ The miner currently implements proper mining logic for:
 - ✅ **A2** – Column-Band vs Regions Star-Budget Squeeze
 - ✅ **C1** – Exact-Match 2×2 Cages in a Band
 - ✅ **C2** – 2×2 Cages vs Region Quota
+- ✅ **C3** – Region-Local Cages (exact-cover cage reasoning)
 - ✅ **D1** – Row × Column Intersection
 
 Other families use basic mining logic and can be enhanced as needed.

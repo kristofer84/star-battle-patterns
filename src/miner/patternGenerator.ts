@@ -364,6 +364,89 @@ function generateTestConfigurations(
         configs.push({ forcedStars, forcedEmpties: [...new Set(forcedEmpties)] });
       }
     }
+  } else if (familyId.includes('C3') || familyId.includes('regionLocalCages')) {
+    // For C3: Create configurations that set up region-local cage packing scenarios
+    // Need: regions with valid 2×2 blocks, with some stars placed to create quota constraints
+    
+    // Config 1: Empty board
+    configs.push({ forcedStars: [], forcedEmpties: [] });
+    
+    // Config 2: Place stars in regions to create quota constraints
+    if (preconditionData?.regions && Array.isArray(preconditionData.regions)) {
+      for (const regionInfo of preconditionData.regions) {
+        const regionId = typeof regionInfo === 'object' ? regionInfo.id : regionInfo;
+        const region = state.regions.find(r => r.id === regionId);
+        
+        if (region && region.cells.length > 0) {
+          // Find a 2×2 block fully inside this region
+          const regionCellSet = new Set(region.cells);
+          let foundBlock = false;
+          
+          for (let r = 0; r < height - 1 && !foundBlock; r++) {
+            for (let c = 0; c < width - 1 && !foundBlock; c++) {
+              const topLeft = r * width + c;
+              const topRight = r * width + (c + 1);
+              const bottomLeft = (r + 1) * width + c;
+              const bottomRight = (r + 1) * width + (c + 1);
+              
+              // Check if all 4 cells are in region
+              if (regionCellSet.has(topLeft) &&
+                  regionCellSet.has(topRight) &&
+                  regionCellSet.has(bottomLeft) &&
+                  regionCellSet.has(bottomRight)) {
+                
+                // Place a star in one cell of the block
+                const starCell = topLeft;
+                if (starCell < totalCells) {
+                  const forcedEmpties: number[] = [];
+                  // Mark adjacent cells as empty
+                  const row = Math.floor(starCell / width);
+                  const col = starCell % width;
+                  for (let dr = -1; dr <= 1; dr++) {
+                    for (let dc = -1; dc <= 1; dc++) {
+                      if (dr === 0 && dc === 0) continue;
+                      const nr = row + dr;
+                      const nc = col + dc;
+                      if (nr >= 0 && nr < height && nc >= 0 && nc < width) {
+                        const neighborId = nr * width + nc;
+                        if (neighborId < totalCells) {
+                          forcedEmpties.push(neighborId);
+                        }
+                      }
+                    }
+                  }
+                  configs.push({ forcedStars: [starCell], forcedEmpties: [...new Set(forcedEmpties)] });
+                  foundBlock = true;
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+    
+    // Config 3: Place empties to reduce valid blocks, creating exact-cover scenarios
+    // This helps create situations where exact-cover packing becomes necessary
+    if (preconditionData?.total_valid_blocks && preconditionData.total_valid_blocks > 2) {
+      const forcedEmpties: number[] = [];
+      // Place empties in some blocks to reduce the count
+      let emptiesPlaced = 0;
+      const maxEmpties = Math.min(3, Math.floor(preconditionData.total_valid_blocks / 2));
+      
+      for (let r = 0; r < height - 1 && emptiesPlaced < maxEmpties; r += 2) {
+        for (let c = 0; c < width - 1 && emptiesPlaced < maxEmpties; c += 2) {
+          const topLeft = r * width + c;
+          if (topLeft < totalCells && state.cellStates[topLeft] === CellState.Unknown) {
+            forcedEmpties.push(topLeft);
+            emptiesPlaced++;
+          }
+        }
+      }
+      
+      if (forcedEmpties.length > 0) {
+        configs.push({ forcedStars: [], forcedEmpties });
+      }
+    }
   } else {
     // Generic configurations
     configs.push({ forcedStars: [], forcedEmpties: [] });
